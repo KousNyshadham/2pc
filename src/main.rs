@@ -15,8 +15,9 @@ pub mod tpcoptions;
 use coordinator::Coordinator;
 use participant::Participant;
 use client::Client;
-use std::sync::{Arc};
+use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc;
 
 ///
 /// register_clients()
@@ -49,8 +50,15 @@ fn register_clients(
     coordinator: &mut Coordinator,
     n_clients: i32,
     running: &Arc<AtomicBool>) -> Vec<Client> {
-
     let mut clients = vec![];
+	for x in 0..n_clients{
+		let coordinator_tx_copy = coordinator.tx.clone();
+		let (client_tx, client_rx) = mpsc::channel();
+		let is = format!("Client {}", x);
+		let client = Client::new(x, is, coordinator_tx_copy, client_rx, running.clone());
+		coordinator.client_join(client_tx);
+		clients.push(client);
+	}
     // register clients with coordinator (set up communication channels and sync objects)
     // add client to the vector and return the vector.
     clients
@@ -92,8 +100,19 @@ fn register_participants(
     running: &Arc<AtomicBool>, 
     success_prob_op: f64,
     success_prob_msg: f64) -> Vec<Participant> {
-
+	let tLock = Mutex::new(coordinator.tx.clone());
+	let t_arc = Arc::new(tLock);
+	
     let mut participants = vec![];
+	for x in 0..n_participants{
+		let (participant_tx, participant_rx) = mpsc::channel();
+		let rLock = Mutex::new(participant_rx);
+		let r_arc = Arc::new(rLock);
+		let is = format!("Participant {}", x);
+		let participant = Participant::new(x, is, t_arc.clone(), participant_rx, logpathbase.to_string(), running.clone(), success_prob_op, success_prob_msg);
+		coordinator.participant_join(participant_tx);
+		participants.push(participant);
+	}
     // register participants with coordinator (set up communication channels and sync objects)
     // add client to the vector and return the vector.
     participants
@@ -116,6 +135,14 @@ fn launch_clients(
     clients: Vec<Client>,
     n_requests: i32,
     handles: &mut Vec<JoinHandle<()>>) {
+	for client in clients.iter(){
+		let handle = thread::spawn(move || {
+			client.protocol(n_requests);
+		});
+		handles.push(handle);
+	}
+			
+
 
     // do something to create threads for client 'processes'
     // the mutable handles parameter allows you to return 
@@ -138,6 +165,13 @@ fn launch_participants(
     participants: Vec<Participant>,
     handles: &mut Vec<JoinHandle<()>>) {
 
+	for participant in participants.iter(){
+		let handle = thread::spawn(move || {
+			participant.protocol();
+		});
+		handles.push(handle);
+	}
+
     // do something to create threads for participant 'processes'
     // the mutable handles parameter allows you to return 
     // more than one wait handle to the caller to join on. 
@@ -148,9 +182,9 @@ fn launch_participants(
 /// opts: an options structure describing mode and parameters
 /// 
 /// 0. install a signal handler that manages a global atomic boolean flag
-/// 1. creates a new coordinator
-/// 2. creates new clients and registers them with the coordinator
-/// 3. creates new participants and registers them with coordinator
+/// 1. creates a new coordinator(nice)
+/// 2. creates new clients and registers them with the coordinator(nice)
+/// 3. creates new participants and registers them with coordinator(nice)
 /// 4. launches participants in their own threads
 /// 5. launches clients in their own threads
 /// 6. creates a thread to run the coordinator protocol
@@ -176,10 +210,28 @@ fn run(opts: & tpcoptions::TPCOptions) {
 
     // create a coordinator, create and register clients and participants
     // launch threads for all, and wait on handles. 
+	let (coordinator_tx, coordinator_rx) = mpsc::channel();
     let cpath = format!("{}//{}", opts.logpath, "coordinator.log");
-    let mut coordinator: Coordinator;  
-    let clients: Vec<Client>; 
-    let participants: Vec<Participant>;
+    let mut coordinator: Coordinator = Coordinator::new(cpath, running.clone(), opts.success_probability_msg, coordinator_tx, coordinator_rx);  
+	let clients: Vec<Client> = register_clients(&mut coordinator, opts.num_clients, &running);
+	let participants: Vec<Participant> = register_participants(&mut coordinator, opts.num_participants, &opts.logpath,&running,  opts.success_probability_ops, opts.success_probability_msg);
+	launch_participants(participants, &mut handles);
+	//launch_clients(clients,opts.num_requests, &mut handles);
+
+/*
+
+fn launch_clients(
+    clients: Vec<Client>,
+    n_requests: i32,
+    handles: &mut Vec<JoinHandle<()>>) {
+	for _ in 0..n_requests:
+
+
+
+fn launch_participants(
+    participants: Vec<Participant>,
+    handles: &mut Vec<JoinHandle<()>>) {
+*/
 
     // wait for clients, participants, and coordinator here...
 }
