@@ -55,7 +55,8 @@ pub struct ProtocolMessage {
     pub mtype: MessageType,
     pub uid: i32,
     pub txid: i32,
-    pub senderid: String, 
+    pub senderstringid: String, 
+	pub senderid: i32,
     pub opid: i32,
 }
 
@@ -63,21 +64,23 @@ pub struct ProtocolMessage {
 /// ProtocolMessage implementation
 /// 
 impl ProtocolMessage {
-    pub fn generate(t: MessageType, tid: i32, sid: String, oid: i32) -> ProtocolMessage {
+    pub fn generate(t: MessageType, tid: i32, ssid: String, sid: i32, oid: i32) -> ProtocolMessage {
         ProtocolMessage {
             mtype: t,
             uid: COUNTER.fetch_add(1, Ordering::SeqCst),
             txid: tid,
-            senderid: sid,
+            senderstringid: ssid,
+			senderid: sid,
             opid: oid,
         }
     }
-    pub fn instantiate(t: MessageType, u: i32, tid: i32, sid: String, oid: i32) -> ProtocolMessage {
+    pub fn instantiate(t: MessageType, u: i32, tid: i32, ssid: String,sid:i32, oid: i32) -> ProtocolMessage {
         ProtocolMessage {
             mtype: t,
             uid: u,
             txid: tid,
-            senderid: sid,
+            senderstringid: ssid,
+			senderid: sid,
             opid: oid,
         }
     }

@@ -6,12 +6,13 @@ extern crate log;
 extern crate stderrlog;
 use std::sync::mpsc::{Sender, Receiver};
 use std::sync::atomic::{AtomicI32, AtomicBool, Ordering};
-use std::sync::{Arc};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use std::thread;
 use std::collections::HashMap;
 use message;
 use message::MessageType;
+use message::ProtocolMessage;
 use message::RequestStatus;
 
 // static counter for getting unique TXID numbers
@@ -23,7 +24,12 @@ static TXID_COUNTER: AtomicI32 = AtomicI32::new(1);
 #[derive(Debug)]
 pub struct Client {    
     pub id: i32,
-    // ...
+	pub is: String,
+    pub txl: Arc<Mutex<Sender<ProtocolMessage>>>, 
+    pub rxl: Arc<Mutex<Receiver<ProtocolMessage>>>, 
+	pub r: Arc<AtomicBool>,
+	pub ccommit: i32,
+	pub cabort: i32,
 }
 
 ///
@@ -49,12 +55,17 @@ impl Client {
     /// 
     pub fn new(i: i32,
                is: String,
-               tx: Sender<message::ProtocolMessage>,
-               rx: Receiver<message::ProtocolMessage>,
+    			txl: Arc<Mutex<Sender<ProtocolMessage>>>, 
+    			rxl: Arc<Mutex<Receiver<ProtocolMessage>>>, 
                r: Arc<AtomicBool>) -> Client {
         Client {
             id: i,
-            // ...
+			is,
+			txl,
+			rxl,
+			r,
+			ccommit:0,
+			cabort:0,
         }   
     }
 
@@ -66,7 +77,8 @@ impl Client {
 
         trace!("Client_{} waiting for exit signal", self.id);
 
-        // TODO 
+		while self.r.load(Ordering::SeqCst){
+		}
 
         trace!("Client_{} exiting", self.id);
     }
@@ -80,18 +92,21 @@ impl Client {
         trace!("Client_{}::send_next_operation", self.id);
 
         // create a new request with a unique TXID.         
-        let request_no: i32 = 0; // TODO--choose another number!
+        //let request_no: i32 = 0; // TODO--choose another number!
         let txid = TXID_COUNTER.fetch_add(1, Ordering::SeqCst);
+		let request_no = txid;
+
 
         info!("Client {} request({})->txid:{} called", self.id, request_no, txid);
         let pm = message::ProtocolMessage::generate(message::MessageType::ClientRequest, 
                                                     txid, 
-                                                    format!("Client_{}", self.id), 
+                                                    format!("Client_{}", self.id),self.id,
                                                     request_no);
 
         info!("client {} calling send...", self.id);
 
-        // TODO
+		let	tx = self.txl.lock().unwrap();
+		tx.send(pm).unwrap();
 
         trace!("Client_{}::exit send_next_operation", self.id);
     }
@@ -105,8 +120,14 @@ impl Client {
     pub fn recv_result(&mut self) {
 
         trace!("Client_{}::recv_result", self.id);
-
-        // TODO
+		let rx = self.rxl.lock().unwrap();
+		let msg = rx.recv().unwrap();
+		if(msg.mtype == MessageType::ClientResultCommit){
+			self.ccommit+=1;
+		}
+		else{
+			self.cabort+=1;
+		}
 
         trace!("Client_{}::exit recv_result", self.id);
     }
@@ -119,9 +140,9 @@ impl Client {
     pub fn report_status(&mut self) {
 
         // TODO: collect real stats!
-        let successful_ops: usize = 0;
-        let failed_ops: usize = 0; 
-        let unknown_ops: usize = 0; 
+        let successful_ops: i32 = self.ccommit;
+        let failed_ops: i32 = self.cabort;
+        let unknown_ops: i32 = 0; 
         println!("Client_{}:\tC:{}\tA:{}\tU:{}", self.id, successful_ops, failed_ops, unknown_ops);
     }    
 
@@ -136,11 +157,27 @@ impl Client {
 
         // run the 2PC protocol for each of n_requests
 
-        // TODO 
+		for i in 0..n_requests{
+			self.send_next_operation();
+			self.recv_result();
+		}
+		
+
+		
 
         // wait for signal to exit
         // and then report status
         self.wait_for_exit_signal();
+		if(self.id == 0){
+				let pm = message::ProtocolMessage::generate(message::MessageType::CoordinatorExit, 
+															69, 
+															format!("Client_{}", 69),69,
+															69);
+
+				let	tx = self.txl.lock().unwrap();
+				tx.send(pm).unwrap();
+
+		}
         self.report_status();
     }
 }

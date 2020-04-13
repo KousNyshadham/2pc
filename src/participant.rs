@@ -10,7 +10,7 @@ use std::sync::mpsc;
 use std::sync::mpsc::{Sender, Receiver};
 use std::time::Duration;
 use std::sync::atomic::{AtomicI32};
-use std::sync::{Arc};
+use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
 use message::MessageType;
 use message::ProtocolMessage;
@@ -19,15 +19,6 @@ use std::collections::HashMap;
 use std::thread;
 use oplog;
 
-/// 
-/// ParticipantState
-/// enum for participant 2PC state machine
-/// 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ParticipantState {    
-    Quiescent,          
-    // TODO ...
-}
 
 ///
 /// Participant
@@ -37,11 +28,15 @@ pub enum ParticipantState {
 #[derive(Debug)]
 pub struct Participant {    
     id: i32,
-    state: ParticipantState,
+	is: String,
     log: oplog::OpLog,
     op_success_prob: f64,
     msg_success_prob: f64,
-    // TODO...
+	r: Arc<AtomicBool>,
+    txl: Arc<Mutex<Sender<ProtocolMessage>>>, 
+    rxl: Arc<Mutex<Receiver<ProtocolMessage>>>, 
+	pcommit:i32,
+	pabort:i32,
 }
 
 ///
@@ -69,20 +64,24 @@ impl Participant {
     /// 
     pub fn new(
         i: i32, is: String, 
-        tx: Sender<ProtocolMessage>, 
-        rx: Receiver<ProtocolMessage>, 
+        txl: Arc<Mutex<Sender<ProtocolMessage>>>, 
+        rxl: Arc<Mutex<Receiver<ProtocolMessage>>>, 
         logpath: String,
-        r: &Arc<AtomicBool>,
+        r: Arc<AtomicBool>,
         f_success_prob_ops: f64,
         f_success_prob_msg: f64) -> Participant {
 
         Participant {
             id: i,
+			is,
             log: oplog::OpLog::new(logpath),
             op_success_prob: f_success_prob_ops,
             msg_success_prob: f_success_prob_msg,
-            state: ParticipantState::Quiescent,
-            // TODO ... 
+			r,
+			txl,
+			rxl,
+			pcommit:0,
+			pabort:0,
         }   
     }
 
@@ -99,7 +98,8 @@ impl Participant {
     pub fn send(&mut self, pm: ProtocolMessage) -> bool {
         let result: bool = true;
 
-        // TODO
+		let tx = self.txl.lock().unwrap();
+		tx.send(pm).unwrap();
 
         result
     }
@@ -138,7 +138,7 @@ impl Participant {
     ///       (it's ok to add parameters or return something other than 
     ///       bool if it's more convenient for your design).
     /// 
-    pub fn perform_operation(&mut self, request: &Option<ProtocolMessage>) -> bool {
+    pub fn perform_operation(&mut self) -> bool {
 
         trace!("participant::perform_operation");
 
@@ -146,13 +146,10 @@ impl Participant {
 
         let x: f64 = random();
         if x > self.op_success_prob {
-            
-            // TODO: fail the request
+			result = RequestStatus::Aborted;
 
         } else {
-
-            // TODO: request succeeds!
-
+			result = RequestStatus::Committed;
         }
 
         trace!("exit participant::perform_operation");
@@ -167,24 +164,21 @@ impl Participant {
     pub fn report_status(&mut self) {
 
         // TODO: maintain actual stats!
-        let global_successful_ops: usize = 0;
-        let global_failed_ops: usize = 0;
+        let global_successful_ops: i32 = self.pcommit;
+        let global_failed_ops: i32 = self.pabort;
         let global_unknown_ops: usize = 0;
         println!("participant_{}:\tC:{}\tA:{}\tU:{}", self.id, global_successful_ops, global_failed_ops, global_unknown_ops);
     }
 
-    ///
-    /// wait_for_exit_signal(&mut self)
-    /// wait until the running flag is set by the CTRL-C handler
-    /// 
-    pub fn wait_for_exit_signal(&mut self) {
+    pub fn recv_msg(&mut self) -> ProtocolMessage {
 
-        trace!("participant_{} waiting for exit signal", self.id);
+        trace!("coordinator::recv_request...");
 
-        // TODO
-
-        trace!("participant_{} exiting", self.id);
-    }    
+		let rx = self.rxl.lock().unwrap();
+		let msg = rx.recv().unwrap();
+        trace!("leaving coordinator::recv_request");
+        msg
+    }        
 
     ///
     /// protocol()
@@ -196,9 +190,29 @@ impl Participant {
         
         trace!("Participant_{}::protocol", self.id);
 
-        // TODO
+		while(true){
+			let msg = self.recv_msg();
+			if(msg.mtype == MessageType::CoordinatorExit){
+				break;
+			}
+			let mut stag1 = ProtocolMessage::generate(MessageType::ParticipantVoteCommit, msg.txid,msg.senderstringid.clone(),msg.senderid,msg.opid);
+			let succ = self.perform_operation();
+			if(succ == false){
+				stag1 = ProtocolMessage::generate(MessageType::ParticipantVoteAbort, msg.txid, msg.senderstringid.clone(), msg.senderid, msg.opid);	
+			}
+			self.send(stag1);
+			let globalDecision = self.recv_msg();;
+			if(globalDecision.mtype == MessageType::CoordinatorCommit){
+				self.pcommit+=1;
+				self.log.append(MessageType::CoordinatorCommit, msg.txid,msg.senderstringid.clone(), msg.senderid,msg.opid);
+					
+			}
+			else{
+				self.pabort+=1;
+				self.log.append(MessageType::CoordinatorAbort, msg.txid,msg.senderstringid.clone(), msg.senderid,msg.opid);
+			}
+		}
 
-        self.wait_for_exit_signal();
         self.report_status();
     }
 }
