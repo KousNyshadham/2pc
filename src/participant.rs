@@ -115,13 +115,14 @@ impl Participant {
     ///       actual sending, but you can use the threshold 
     ///       logic in this implementation below. 
     /// 
-    pub fn send_unreliable(&mut self, pm: ProtocolMessage) -> bool {
+    pub fn send_unreliable(&mut self, msg: ProtocolMessage) -> bool {
         let x: f64 = random();
         let result: bool;
         if x < self.msg_success_prob {
-            result = self.send(pm);
+            result = self.send(msg);
         } else {
-            result = false;
+			let mut fail = ProtocolMessage::generate(MessageType::ParticipantVoteAbort, msg.txid,msg.senderstringid.clone(),msg.senderid,msg.opid);
+            result = self.send(fail);
         }
         result
     }    
@@ -200,7 +201,7 @@ impl Participant {
 			if(succ == false){
 				stag1 = ProtocolMessage::generate(MessageType::ParticipantVoteAbort, msg.txid, msg.senderstringid.clone(), msg.senderid, msg.opid);	
 			}
-			self.send(stag1);
+			self.send_unreliable(stag1);
 			let globalDecision = self.recv_msg();;
 			if(globalDecision.mtype == MessageType::CoordinatorCommit){
 				self.pcommit+=1;

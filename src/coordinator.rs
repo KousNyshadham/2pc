@@ -119,15 +119,7 @@ impl Coordinator {
 
         let x: f64 = random();
         let mut result: bool = true;
-        if x < self.msg_success_prob {
-			
-			sender.send(pm).unwrap();
-
-
-        } else {
-
-            result = false;
-        }
+		sender.send(pm).unwrap();
         result
     }     
 
