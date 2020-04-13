@@ -170,10 +170,18 @@ impl Coordinator {
 				}
 				self.send(&participant_tx, two_participant);
 				if(msg.mtype != MessageType::CoordinatorExit){
-					let msg2 = self.rx2.recv().unwrap();
-					if(msg2.mtype == MessageType::ParticipantVoteAbort){
-						count+=1;
+					let d = Duration::from_millis(1000);
+					let msg2 = self.rx2.recv_timeout(d);
+					match msg2{
+						Ok(bruh) => {
+							if(bruh.mtype == MessageType::ParticipantVoteAbort){
+								count+=1;
+							}
+						},
+						Err(e) => {count+=1},
 					}
+					/*
+					*/
 				}
 			}
 			if(msg.mtype == MessageType::CoordinatorExit){

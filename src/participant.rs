@@ -121,8 +121,10 @@ impl Participant {
         if x < self.msg_success_prob {
             result = self.send(msg);
         } else {
-			let mut fail = ProtocolMessage::generate(MessageType::ParticipantVoteAbort, msg.txid,msg.senderstringid.clone(),msg.senderid,msg.opid);
-            result = self.send(fail);
+			result = false;
+			//let mut fail = ProtocolMessage::generate(MessageType::ParticipantVoteAbort, msg.txid,msg.senderstringid.clone(),msg.senderid,msg.opid);
+            //result = self.send(fail);
+
         }
         result
     }    
